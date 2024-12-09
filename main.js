@@ -4,9 +4,11 @@ import forceFragmentShader from '/src/shaders/forceFragmentShader.glsl';
 import positionFragmentShader from '/src/shaders/positionFragmentShader.glsl';
 
 // Initialize variables
-let particleCount = 100; // default particle count (updated)
+let particleCount = 100; // Default particle count
+let deltaTime = 0.016; // Default timestep
+let gravitationalConstant = 20; // Default G value
 let positionTexture, velocityTexture, positionRenderTarget, velocityRenderTarget;
-let particleSystem;
+let particleSystem, forceMaterial, positionMaterial;
 
 // Create scene and camera
 const scene = new THREE.Scene();
@@ -33,6 +35,34 @@ controls.enableZoom = true;
 controls.enableRotate = true;
 controls.minDistance = 1;
 controls.maxDistance = 100;
+
+// Attach Event Listeners
+const slider = document.getElementById('particle-slider');
+const particleCountLabel = document.getElementById('particle-count');
+slider.addEventListener('input', () => {
+  particleCount = parseInt(slider.value, 10);
+  particleCountLabel.textContent = particleCount;
+
+  // Reinitialize the data and particle system
+  scene.remove(particleSystem);
+  initializeDataTextures();
+  initializeMaterials();
+  initializeParticleSystem();
+});
+
+const gSlider = document.getElementById('g-slider');
+const gValueElement = document.getElementById('g-value');
+gSlider.addEventListener('input', () => {
+  gravitationalConstant = parseFloat(gSlider.value);
+  gValueElement.textContent = gravitationalConstant.toFixed(1);
+});
+
+const timestepSlider = document.getElementById('timestep-slider');
+const timestepValueElement = document.getElementById('timestep-value');
+timestepSlider.addEventListener('input', () => {
+  deltaTime = parseFloat(timestepSlider.value);
+  timestepValueElement.textContent = deltaTime.toFixed(3);
+});
 
 // Initialize data textures
 function initializeDataTextures() {
@@ -81,6 +111,29 @@ function initializeDataTextures() {
   );
 }
 
+// Initialize materials
+function initializeMaterials() {
+  forceMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      positionTexture: { value: positionTexture },
+      velocityTexture: { value: velocityTexture },
+      deltaTime: { value: deltaTime },
+      G: { value: gravitationalConstant },
+      softening: { value: 0.01 },
+    },
+    fragmentShader: forceFragmentShader,
+  });
+
+  positionMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      positionTexture: { value: positionTexture },
+      velocityTexture: { value: velocityTexture },
+      deltaTime: { value: deltaTime },
+    },
+    fragmentShader: positionFragmentShader,
+  });
+}
+
 // Initialize particle system
 function initializeParticleSystem() {
   const geometry = new THREE.BufferGeometry();
@@ -92,16 +145,16 @@ function initializeParticleSystem() {
   const particleMaterial = new THREE.ShaderMaterial({
     uniforms: {
       positionTexture: { value: positionTexture },
-      textureSize: { value: Math.sqrt(particleCount) }, // Pass the square root of particle count
+      textureSize: { value: Math.sqrt(particleCount) },
     },
     vertexShader: `
       uniform sampler2D positionTexture;
-      uniform float textureSize; // Pass the texture size
+      uniform float textureSize;
 
       void main() {
         float particleIndex = float(gl_VertexID);
-        float texX = mod(particleIndex, textureSize) / textureSize; // X coordinate
-        float texY = floor(particleIndex / textureSize) / textureSize; // Y coordinate
+        float texX = mod(particleIndex, textureSize) / textureSize;
+        float texY = floor(particleIndex / textureSize) / textureSize;
         vec2 uv = vec2(texX, texY);
 
         vec4 pos = texture2D(positionTexture, uv);
@@ -121,112 +174,61 @@ function initializeParticleSystem() {
   scene.add(particleSystem);
 }
 
-// Update Textures
+// Update textures
 function updateTextures(deltaTime) {
-    const forceMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        positionTexture: { value: positionTexture },
-        velocityTexture: { value: velocityTexture },
-        deltaTime: { value: deltaTime },
-        G: { value: gravitationalConstant }, // Use dynamic G value
-        softening: { value: 0.01 },
-      },
-      fragmentShader: forceFragmentShader,
-    });
-  
-    renderer.setRenderTarget(velocityRenderTarget);
-    renderer.render(scene, camera);
-  
-    const positionMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        positionTexture: { value: positionTexture },
-        velocityTexture: { value: velocityTexture },
-        deltaTime: { value: deltaTime },
-      },
-      fragmentShader: positionFragmentShader,
-    });
-  
-    renderer.setRenderTarget(positionRenderTarget);
-    renderer.render(scene, camera);
-  
-    // Swap textures
-    [positionTexture, positionRenderTarget.texture] = [
-      positionRenderTarget.texture,
-      positionTexture,
-    ];
-    [velocityTexture, velocityRenderTarget.texture] = [
-      velocityRenderTarget.texture,
-      velocityTexture,
-    ];
+  // Update uniforms
+  forceMaterial.uniforms.positionTexture.value = positionTexture;
+  forceMaterial.uniforms.velocityTexture.value = velocityTexture;
+  forceMaterial.uniforms.deltaTime.value = deltaTime;
+  forceMaterial.uniforms.G.value = gravitationalConstant;
+
+  positionMaterial.uniforms.positionTexture.value = positionTexture;
+  positionMaterial.uniforms.velocityTexture.value = velocityTexture;
+  positionMaterial.uniforms.deltaTime.value = deltaTime;
+
+  // Apply force shader
+  const forceScene = new THREE.Scene();
+  const forceQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), forceMaterial);
+  forceScene.add(forceQuad);
+
+  renderer.setRenderTarget(velocityRenderTarget);
+  renderer.render(forceScene, camera);
+
+  // Apply position shader
+  const positionScene = new THREE.Scene();
+  const positionQuad = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    positionMaterial
+  );
+  positionScene.add(positionQuad);
+
+  renderer.setRenderTarget(positionRenderTarget);
+  renderer.render(positionScene, camera);
+
+  // Swap textures
+  [positionTexture, positionRenderTarget.texture] = [
+    positionRenderTarget.texture,
+    positionTexture,
+  ];
+  [velocityTexture, velocityRenderTarget.texture] = [
+    velocityRenderTarget.texture,
+    velocityTexture,
+  ];
 }
 
-
-let lastFrameTime = performance.now(); // Track time of the last frame
-let fps = 0; // Current FPS value
-
-function updateFPS() {
-  const now = performance.now();
-  fps = Math.round(1000 / (now - lastFrameTime)); // Calculate FPS
-  lastFrameTime = now;
-
-  // Update the FPS counter in the HTML
-  const fpsValueElement = document.getElementById('fps-value');
-  if (fpsValueElement) {
-    fpsValueElement.textContent = fps;
-  }
-}
-
-let deltaTime = 0.016; // Default timestep
-
-const timestepSlider = document.getElementById('timestep-slider');
-const timestepValueElement = document.getElementById('timestep-value');
-
-timestepSlider.addEventListener('input', () => {
-  deltaTime = parseFloat(timestepSlider.value); // Update timestep
-  timestepValueElement.textContent = deltaTime.toFixed(3); // Display the value
-});
-
-let gravitationalConstant = 20; // Default value for G
-
-const gSlider = document.getElementById('g-slider');
-const gValueElement = document.getElementById('g-value');
-
-gSlider.addEventListener('input', () => {
-  gravitationalConstant = parseFloat(gSlider.value); // Update G
-  gValueElement.textContent = gravitationalConstant; // Display current G
-});
-
-
-
+// Animation loop
 function animate() {
-    requestAnimationFrame(animate);
-  
-    updateTextures(deltaTime); // Use dynamic timestep
-    controls.update();
-    renderer.setRenderTarget(null);
-    renderer.render(scene, camera);
-  
-    // Update FPS
-    updateFPS();
-  }
-  
-  
+  requestAnimationFrame(animate);
 
-// Initialize everything and start the animation
+  updateTextures(deltaTime); // Use dynamic timestep
+  controls.update(); // Update camera controls
+  renderer.setRenderTarget(null);
+  renderer.render(scene, camera); // Render the scene
+  updateFPS(); // Update FPS counter
+}
+
+// Initialize everything
 initializeDataTextures();
+initializeMaterials();
 initializeParticleSystem();
 animate();
-
-// Update particle count dynamically with slider
-const slider = document.getElementById('particle-slider');
-const particleCountLabel = document.getElementById('particle-count');
-
-slider.addEventListener('input', () => {
-  particleCount = parseInt(slider.value, 10);
-  particleCountLabel.textContent = particleCount;
-
-  // Reinitialize the data and particle system
-  scene.remove(particleSystem);
-  initializeDataTextures();
-  initializeParticleSystem();
-});
