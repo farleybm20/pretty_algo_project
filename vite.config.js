@@ -1,20 +1,15 @@
 import { defineConfig } from 'vite';
+import glsl from 'vite-plugin-glsl';
 
 export default defineConfig({
+  plugins: [glsl()],
   resolve: {
     alias: {
       'three/examples': '/node_modules/three/examples',
     },
   },
+  server: {
+    port: 5173,
+    open: true,
+  },
 });
-
-
-// import { defineConfig } from 'vite';
-
-// export default defineConfig({
-//   resolve: {
-//     alias: {
-//       three: '/node_modules/three/build/three.module.js',
-//     },
-//   },
-// });
