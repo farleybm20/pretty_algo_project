@@ -20,7 +20,7 @@ const camera = new THREE.PerspectiveCamera(
     0.001,
     100000
 );
-camera.position.set(0, 0, 10);
+camera.position.set(0, 0, 100);
 
 // Create renderer with logarithmic depth buffer
 const renderer = new THREE.WebGLRenderer({
@@ -37,7 +37,7 @@ controls.dampingFactor = 0.05;
 controls.enableZoom = true;
 controls.enableRotate = true;
 controls.minDistance = 0.01;
-controls.maxDistance = 10000;
+controls.maxDistance = 1000000;
 controls.zoomSpeed = 1.5;
 controls.rotateSpeed = 0.75;
 controls.enablePan = true;
