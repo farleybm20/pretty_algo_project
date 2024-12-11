@@ -8,6 +8,9 @@ let deltaTime = 0.016;
 let gravitationalConstant = 1;
 let particleSystem, geometry;
 
+let blackHoleMass = 1000; // Mass of the black hole relative to particles
+const blackHolePosition = new THREE.Vector3(0, 0, 0); // Center of the galaxy
+
 const gpu = new GPU();
 
 // Create scene
@@ -17,8 +20,8 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(
     60,
     window.innerWidth / window.innerHeight,
-    0.001,
-    100000
+    0.01,
+    1000000
 );
 camera.position.set(0, 0, 100);
 
@@ -158,18 +161,26 @@ function calculateForcesSpatial(positions, velocities, G) {
     return forces;
 }
 
-// Function to create force calculation kernel
 function createForceKernel(count) {
     return gpu.createKernel(function(positions, G) {
         const i = this.thread.x;
-        let fx = 0;
-        let fy = 0;
-        let fz = 0;
-        
         const px = positions[i * 3];
         const py = positions[i * 3 + 1];
         const pz = positions[i * 3 + 2];
         
+        // Black hole force calculation
+        const dx_bh = 0 - px; // Black hole at origin
+        const dy_bh = 0 - py;
+        const dz_bh = 0 - pz;
+        
+        const dist_bh = Math.sqrt(dx_bh * dx_bh + dy_bh * dy_bh + dz_bh * dz_bh + 0.1);
+        const force_bh = (G * this.constants.blackHoleMass) / (dist_bh * dist_bh);
+        
+        let fx = force_bh * dx_bh / dist_bh;
+        let fy = force_bh * dy_bh / dist_bh;
+        let fz = force_bh * dz_bh / dist_bh;
+        
+        // Forces from other particles
         for (let j = 0; j < this.constants.particleCount; j++) {
             if (i === j) continue;
             
@@ -188,7 +199,10 @@ function createForceKernel(count) {
         return [fx, fy, fz];
     })
     .setOutput([count])
-    .setConstants({ particleCount: count });
+    .setConstants({ 
+        particleCount: count,
+        blackHoleMass: blackHoleMass 
+    });
 }
 
 // Initialize force calculation kernel
@@ -235,24 +249,87 @@ document.getElementById('simulation-method').addEventListener('change', (e) => {
     }
 });
 
-// Initialize BufferGeometry
+document.getElementById('blackhole-mass').addEventListener('input', (e) => {
+    blackHoleMass = parseFloat(e.target.value);
+    document.getElementById('blackhole-mass-value').textContent = blackHoleMass;
+    
+    // Update kernel with new black hole mass
+    calculateForces.destroy();
+    calculateForces = createForceKernel(particleCount);
+});
+
+// Modify initializeGeometry function to account for black hole
 function initializeGeometry() {
+    // Create a buffer geometry
+    geometry = new THREE.BufferGeometry();
+
+    // Create arrays using the global numberOfStars constant
     const positions = new Float32Array(particleCount * 3);
     const velocities = new Float32Array(particleCount * 3);
+    const uvs = new Float32Array(particleCount * 2);
 
+    // Calculate matrix size for UV coordinates
+    const matrixSize = Math.sqrt(particleCount);
+
+    // Galaxy parameters from global constants
+    const galaxyRadius = 100;  // Using the constant value
+    const galaxyHeight = 5;    // Using the constant value
+    const numArms = 2;
+    const randomness = 0.2;
+    
+    // Generate particles
     for (let i = 0; i < particleCount; i++) {
-        positions[i * 3] = (Math.random() - 0.5) * 10;
-        positions[i * 3 + 1] = (Math.random() - 0.5) * 10;
-        positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
+        let x, y, z, vx, vy, vz;
 
-        velocities[i * 3] = (Math.random() - 0.5) * 0.1;
-        velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.1;
-        velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.1;
+        // Handle central black hole
+        if (i === 0) {
+            x = y = z = 0;
+            vx = vy = vz = 0;
+        } else {
+            // Generate random angle and radius
+            const angle = (i % numArms) * (2 * Math.PI / numArms) + 
+                         (Math.random() * 2 - 1) * randomness;
+            const r = Math.pow(Math.random(), 0.5) * galaxyRadius;
+            
+            // Add spiral arm effect
+            const spiralAngle = angle + (r / galaxyRadius) * 2; // Using middleVelocity value of 2
+            
+            // Calculate positions
+            x = r * Math.cos(spiralAngle);
+            z = r * Math.sin(spiralAngle);
+            y = (Math.random() * 2 - 1) * galaxyHeight * (r / galaxyRadius);
+
+            // Calculate orbital velocities
+            const orbitalSpeed = 15 * Math.sqrt(galaxyRadius / (r + 1)); // Using velocity value of 15
+            vx = -orbitalSpeed * z / (r + 0.1);
+            vz = orbitalSpeed * x / (r + 0.1);
+            vy = 0;
+
+            // Add small random velocity perturbations
+            vx += (Math.random() - 0.5) * 0.3;
+            vy += (Math.random() - 0.5) * 0.3;
+            vz += (Math.random() - 0.5) * 0.3;
+        }
+
+        // Set positions
+        positions[i * 3] = x;
+        positions[i * 3 + 1] = y;
+        positions[i * 3 + 2] = z;
+
+        // Set velocities
+        velocities[i * 3] = vx;
+        velocities[i * 3 + 1] = vy;
+        velocities[i * 3 + 2] = vz;
+
+        // UV coordinates for pixel lookups in shaders
+        uvs[i * 2] = (i % matrixSize) / (matrixSize - 1);
+        uvs[i * 2 + 1] = Math.floor(i / matrixSize) / (matrixSize - 1);
     }
 
-    geometry = new THREE.BufferGeometry();
+    // Set geometry attributes
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
 }
 
 function initializeParticleSystem() {

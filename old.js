@@ -235,21 +235,65 @@ document.getElementById('simulation-method').addEventListener('change', (e) => {
     }
 });
 
-// Initialize BufferGeometry
 function initializeGeometry() {
     const positions = new Float32Array(particleCount * 3);
     const velocities = new Float32Array(particleCount * 3);
-
+    
+    // Galaxy parameters
+    const arms = 2;                // Number of spiral arms
+    const armWidth = 0.3;          // Width of the spiral arms
+    const spiralTightness = 0.5;   // How tightly wound the spiral is
+    const bulgeSize = 0.3;         // Size of the central bulge
+    const diskScale = 10;          // Overall scale of the galaxy
+    const diskHeight = 0.1;        // Thickness of the galactic disk
+    
     for (let i = 0; i < particleCount; i++) {
-        positions[i * 3] = (Math.random() - 0.5) * 10;
-        positions[i * 3 + 1] = (Math.random() - 0.5) * 10;
-        positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
-
-        velocities[i * 3] = (Math.random() - 0.5) * 0.1;
-        velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.1;
-        velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.1;
+        let x, y, z;
+        
+        // 20% of particles in the bulge, 80% in the disk
+        if (Math.random() < 0.2) {
+            // Bulge particles - spherical distribution
+            const r = Math.pow(Math.random(), 0.5) * bulgeSize * diskScale;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            
+            x = r * Math.sin(phi) * Math.cos(theta);
+            y = r * Math.sin(phi) * Math.sin(theta);
+            z = r * Math.cos(phi);
+        } else {
+            // Disk particles - spiral arm distribution
+            const r = Math.pow(Math.random(), 0.5) * diskScale;
+            const armAngle = (Math.random() * 2 * Math.PI) / arms;
+            const arm = Math.floor(Math.random() * arms);
+            const theta = (arm * 2 * Math.PI) / arms + armAngle + spiralTightness * Math.log(r);
+            
+            // Add random spread to the arms
+            const spread = (Math.random() - 0.5) * armWidth * r;
+            
+            x = r * Math.cos(theta) + spread * Math.cos(theta + Math.PI/2);
+            y = r * Math.sin(theta) + spread * Math.sin(theta + Math.PI/2);
+            z = (Math.random() - 0.5) * diskHeight * r;
+        }
+        
+        positions[i * 3] = x;
+        positions[i * 3 + 1] = y;
+        positions[i * 3 + 2] = z;
+        
+        // Calculate orbital velocities
+        const r = Math.sqrt(x*x + y*y);
+        const orbital_speed = Math.sqrt(gravitationalConstant / (r + 0.1)) * 0.5;
+        
+        // Set initial velocities for roughly circular orbits
+        velocities[i * 3] = -y / (r + 0.1) * orbital_speed;
+        velocities[i * 3 + 1] = x / (r + 0.1) * orbital_speed;
+        velocities[i * 3 + 2] = 0;
+        
+        // Add small random perturbations
+        velocities[i * 3] += (Math.random() - 0.5) * 0.02;
+        velocities[i * 3 + 1] += (Math.random() - 0.5) * 0.02;
+        velocities[i * 3 + 2] += (Math.random() - 0.5) * 0.01;
     }
-
+    
     geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3));
